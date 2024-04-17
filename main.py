@@ -137,30 +137,6 @@ def get_transform(train):
     transforms.append(T.ToPureTensor())
     return T.Compose(transforms)
 
-# Testing forward pass
-def test_forward_method():
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
-    dataset = SwimmingPoolDataset(DATA_DIR, "train.csv", get_transform(train=True))
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=2,
-        shuffle=True,
-        num_workers=4,
-        collate_fn=utils.collate_fn
-    )
-
-    # For Training
-    images, targets = next(iter(data_loader))
-    images = list(image for image in images)
-    targets = [{k: v for k, v in t.items()} for t in targets]
-    output = model(images, targets)  # Returns losses and detections
-    print(output)
-
-    # For inference
-    model.eval()
-    x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
-    predictions = model(x)  # Returns predictions
-    print(predictions[0])
 
 def main_train():
     # train on the GPU or on the CPU, if a GPU is not available
@@ -220,7 +196,6 @@ def main_train():
 
     # let's train it just for 2 epochs
     num_epochs = 50
-
     for epoch in range(num_epochs):
         # train for one epoch, printing every 10 iterations
         train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
@@ -229,36 +204,38 @@ def main_train():
         # evaluate on the test dataset
         evaluate(model, data_loader_val, device=device)
 
-    print("That's it!")
 
 
+    df = pd.read_csv("test.csv")
+    image = read_image(os.path.join(DATA_DIR, df.iloc[10, 1])) # load image number idx in train dataset
+    # mask = read_image(os.path.join(DATA_DIR, df.iloc[10, 2]))  # load mask number idx in train dataset
+
+    # image = read_image("data/PennFudanPed/PNGImages/FudanPed00046.png")
+    eval_transform = get_transform(train=False)
+
+    model.eval()
+    with torch.no_grad():
+        x = eval_transform(image)
+        # convert RGBA -> RGB and move to device
+        x = x[:3, ...].to(device)
+        predictions = model([x, ])
+        pred = predictions[0]
 
 
+    image = (255.0 * (image - image.min()) / (image.max() - image.min())).to(torch.uint8)
+    image = image[:3, ...]
+    pred_labels = [f"pedestrian: {score:.3f}" for label, score in zip(pred["labels"], pred["scores"])]
+    pred_boxes = pred["boxes"].long()
+    output_image = draw_bounding_boxes(image, pred_boxes, pred_labels, colors="red")
 
-# image = read_image("data/PennFudanPed/PNGImages/FudanPed00046.png")
-# eval_transform = get_transform(train=False)
-
-# model.eval()
-# with torch.no_grad():
-#     x = eval_transform(image)
-#     # convert RGBA -> RGB and move to device
-#     x = x[:3, ...].to(device)
-#     predictions = model([x, ])
-#     pred = predictions[0]
+    # masks = (pred["masks"] > 0.7).squeeze(1)
+    # output_image = draw_segmentation_masks(output_image, masks, alpha=0.5, colors="blue")
 
 
-# image = (255.0 * (image - image.min()) / (image.max() - image.min())).to(torch.uint8)
-# image = image[:3, ...]
-# pred_labels = [f"pedestrian: {score:.3f}" for label, score in zip(pred["labels"], pred["scores"])]
-# pred_boxes = pred["boxes"].long()
-# output_image = draw_bounding_boxes(image, pred_boxes, pred_labels, colors="red")
+    plt.figure(figsize=(12, 12))
+    plt.imshow(output_image.permute(1, 2, 0))
+    plt.savefig("predictions.png")
 
-# masks = (pred["masks"] > 0.7).squeeze(1)
-# output_image = draw_segmentation_masks(output_image, masks, alpha=0.5, colors="blue")
-
-
-# plt.figure(figsize=(12, 12))
-# plt.imshow(output_image.permute(1, 2, 0))
 
 if __name__ == "__main__":
     main_train()
